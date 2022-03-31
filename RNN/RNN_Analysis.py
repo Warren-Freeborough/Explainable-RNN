@@ -36,20 +36,28 @@ hyper_params={
     "sequence_length" : 92,
     "batch_size" : 1000,
 }
+#set seed to allow for reporducibility
+os.environ["CUBLAS_WORKSPACE_CONFIG"]=":4096:2"
+seed = 42
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 # Import data
 #set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #Import data
-Raw_data = pd.read_csv("../Data/Raw_data.csv",index_col=0)
-Training_df = pd.read_csv("../Data/Train.csv",index_col=0)
-Val_df = pd.read_csv("../Data/Val.csv",index_col=0)
-Test_df = pd.read_csv("../Data/Test.csv",index_col=0)
+Raw_data = pd.read_csv("../../Data/Raw_data.csv",index_col=0)
+Training_df = pd.read_csv("../../Data/Train.csv",index_col=0)
+Val_df = pd.read_csv("../../Data/Val.csv",index_col=0)
+Test_df = pd.read_csv("../../Data/Test.csv",index_col=0)
 
 #Import data required to undo normalization
 #import the list of min_maxs for normalization
 min_max= []
-with open('../Data/Min_max.txt', 'r') as file:
+with open('../../Data/Min_max.txt', 'r') as file:
     contents = file.readlines()
     for i in contents:
         i.strip("''")
@@ -64,7 +72,7 @@ for i in range(len(min_max)):
             
 #import the list of lambdas
 lambda_list = []
-with open('../Data/Lambda.txt', 'r') as file:
+with open('../../Data/Lambda.txt', 'r') as file:
     contents = file.readlines()
     for i in contents:
         i.strip("''")
@@ -78,7 +86,7 @@ for i in range(len(lambda_list)):
             lambda_list[i][j] = lambda_list[i][j].strip("'")
 
 #Import Trend Data
-Trend = pd.read_csv("../Data/Trend.csv",index_col=0)
+Trend = pd.read_csv("../../Data/Trend.csv",index_col=0)
 
 #Prepare Validation and Test dataset
 #Add the last 92 entries from Training to Validation. 
@@ -188,7 +196,7 @@ criterion = nn.MSELoss()
 opt = torch.optim.Adam(model.parameters(),lr=hyper_params['alpha'])
 
 #Load model
-model.load_state_dict(torch.load("../Weights/RNN.pt"))
+model.load_state_dict(torch.load("./Weights/Best/Reproduce.pt"))
 model.eval()
 #Determine accuracy for each dataset
 trainloader = DataLoader(dataset=Training_data,batch_size=len(Training_data),shuffle=False,num_workers=0)
@@ -238,12 +246,12 @@ class Ablated_Data(Dataset):
         return (self.__len__())
 
 #Create error array
-Ablation_Error_array = np.zeros((115,6,92))
+Ablation_Error_array = np.zeros((108,6,92))
 Start = 93
 Window = 1
 for i in range(6):
-    for j in range(115):
-            Start = 93+i
+    for j in range(108):
+            Start = 93+j
             Complete_ablated = Test_df2.copy()
             ablate_column = Ablate(Test_df2,i,Start,Window)
             Complete_ablated.iloc[:,i] = ablate_column.copy()
@@ -274,11 +282,11 @@ for i in range(6):
 Avg_Ablation_Error = np.mean(Ablation_Error_array,axis=0)
 fig, ax = plt.subplots(figsize=(20,5)) 
 ax = sns.heatmap(np.log(Avg_Ablation_Error),vmin=-14,vmax=0,cmap="cubehelix",yticklabels=Test_df.columns)
-fig.savefig('Results\RNN_Ablation_log.pdf')
+fig.savefig('Results\RNN_Ablation_log.pdf',dpi=900)
 
 fig2, ax2 = plt.subplots(figsize=(20,5)) 
 ax2 = sns.heatmap(Avg_Ablation_Error,cmap="Blues",vmin=0,vmax=0.015,yticklabels=Test_df.columns)
-fig2.savefig('Results\RNN_Ablation.pdf')
+fig2.savefig('Results\RNN_Ablation.pdf',dpi=900)
 print("Finished Ablation")
 
 #_________________________________________________________________________________________________________________
@@ -327,12 +335,12 @@ for cell in range(92):
 fig3, ax = plt.subplots(figsize=(20,5)) 
 ax = sns.heatmap(np.reshape(Cell_SMAPE,(1,92)),vmin=0,vmax=0.45,cmap="Blues")
 plt.xlabel("Day") 
-fig3.savefig('Results\\RNN_Noise.pdf')
+fig3.savefig('Results\\RNN_Noise.pdf',dpi=900)
 
 fig4, ax = plt.subplots(figsize=(20,5)) 
 ax = sns.heatmap(np.log(np.reshape(Cell_SMAPE,(1,92))),vmax=0,cmap="cubehelix",yticklabels="")
 plt.xlabel("Day") 
-fig4.savefig('Results\\RNN_Noise_log.pdf')
+fig4.savefig('Results\\RNN_Noise_log.pdf',dpi=900)
 print("Finished Noise")
 #_________________________________________________________________________________________________________________
 #Permutation
@@ -376,19 +384,18 @@ for i in np.arange(1,7):
     for j in x:
         combinations.append(list(j))
 
-epochs = 100
+features = Test_df2.columns
+epochs = 300
 X = []
 Y = []
 Combo_Error_all =[]
-for combo in combinations:
-    Avg_Error_for_combo =[]
+for feature in range(len(features)):
     for i in range(epochs):
         #print("combo: ",combo)
         Combined = Test_df2.copy()
         Permuted_DF = Permute(Test_df2,6)
         #for each feature in list, change the features to the permuted
-        for feature in combo:
-            Combined.iloc[:,feature] = Permuted_DF.iloc[:,feature]
+        Combined.iloc[:,feature] = Permuted_DF.iloc[:,feature]
         #create a dataset
         Permute_Dataset = Permuted_Data(Original_Data=Test_df2, Permuted_data= Combined,window =hyper_params['sequence_length'])
         P_loader = DataLoader(dataset=Permute_Dataset,batch_size=len(Permute_Dataset),shuffle=False,num_workers=0)
@@ -402,10 +409,10 @@ for combo in combinations:
                 Per_SMAPE = SMAPE(Actual=Predicted,Predicted=Predicted_Per)
         #create OHE dataset for which columns are permuted
         OHE = [0,0,0,0,0,0]
-        for feature in combo:
-            OHE[feature]=1
+        OHE[feature] = 1
         X.append(OHE)
         Y.append(Per_SMAPE)
+
 
 #create DF
 Permuted_df2 = pd.concat([pd.DataFrame(X),pd.DataFrame(Y)],axis=1, join="inner")
@@ -421,15 +428,20 @@ importance = res.params
 # plot feature importance
 plt.rcdefaults()
 fig5, ax = plt.subplots()
-features = Permuted_df2.columns
-ax.barh([x for x in range(len(importance))], 100*(importance/np.sum(importance)))
+ax.barh([x for x in range(len(importance))], 100*(importance/np.sum(importance)),color='lightgreen')
 y = np.arange(len(features))
 ax.set_yticks(y)
+ax.set_title('RNN')
 ax.set_yticklabels(features)
 ax.invert_yaxis()  # labels read top-to-bottom
 ax.set_xlabel('Percent of error contributed')
-ax.set_title('Percent of error contributed by permuting each feature')
-fig5.savefig('Results\RNN_Permutation.pdf')
+ax.spines['right'].set_visible(False)
+ax.spines['top'].set_visible(False)
+values = list(round(100*(importance/np.sum(importance)),2))
+for i, v in enumerate(values):
+    ax.text(v, i, str(v)+'%', 
+            color = 'Black')
+fig5.savefig('Results\RNN_Permutation.pdf',dpi=900)
 print("Finished Permutation")
 
 #________________________________________________________________________________________________________________
@@ -465,17 +477,17 @@ at_mean = np.mean(np.array(at_mean.cpu()),axis=0)
 
 fig6 = plt.figure(figsize=(20,3))
 ax = sns.heatmap(np.log(at_mean.T),cmap="cubehelix",vmax=0,vmin=-35,yticklabels=Test_df2.columns)
-fig6.savefig('Results\RNN_Attributions_log+.pdf')
+fig6.savefig('Results\RNN_Attributions_log+.pdf',dpi=900)
 
 fig7 = plt.figure(figsize=(20,3))
 ax = sns.heatmap(np.log(-1*at_mean.T),cmap="cubehelix",vmax=0,vmin=-35,yticklabels=Test_df2.columns)
-fig7.savefig('Results\RNN_Attributions_log-.pdf')
+fig7.savefig('Results\RNN_Attributions_log-.pdf',dpi=900)
 
 fig8 = plt.figure(figsize=(20,3))
 ax = sns.heatmap(at_mean.T,cmap="Blues",yticklabels=Test_df2.columns)
-fig8.savefig('Results\RNN_Attributions.pdf')
+fig8.savefig('Results\RNN_Attributions.pdf',dpi=900)
 
 fig9 = plt.figure(figsize=(20,3))
 ax = sns.heatmap(np.log(np.abs(at_mean.T)),cmap="cubehelix", vmin=-35,yticklabels=Test_df2.columns)
-fig9.savefig('Results\RNN_Attributions_log_abs.pdf')
+fig9.savefig('Results\RNN_Attributions_log_abs.pdf',dpi=900)
 print("Finished Attributions")
